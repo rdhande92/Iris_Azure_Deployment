@@ -1,0 +1,73 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: build
+    displayName: 'build Stage'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Azure Web App'
+        pool:
+         vmImage: ubuntu-latest
+        steps:
+        - task: UsePythonVersion@0
+          inputs:
+            versionSpec: '3.10'
+            addToPath: true
+            architecture: 'x64'
+          displayName: 'Use Python 3.9'
+
+        - script: |
+              python -m venv antenv
+              source antenv/bin/activate
+              python -m pip install --upgrade pip
+              pip install setup
+              pip install flask-restful
+              pip install --target="./.python_packages/lib/site-packages" -r ./requirements.txt
+          workingDirectory: game
+          displayName: "Install requirements"
+
+        - task: ArchiveFiles@2
+          inputs:
+            rootFolderOrFile: '$(Build.SourcesDirectory)'
+            includeRootFolder: false
+            archiveType: 'zip'
+            archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+            replaceExistingArchive: true
+
+        - publish: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+          displayName: 'upload'
+          artifact: drop
+
+        - task: PublishPipelineArtifact@1
+          inputs:
+            targetPath: '$(Build.ArtifactStagingDirectory)'
+            artifactName: 'drop'
+            publishLocation: 'pipeline'
+          
+
+  - stage: deploy
+    displayName: 'deploy Stage'
+    jobs:
+      - job: DeployJob
+        displayName: 'deploy Azure Web App'
+        pool:
+         vmImage: ubuntu-latest
+        steps:
+        - task: DownloadBuildArtifacts@1
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: 'drop'
+            downloadPath: '$(System.ArtifactsDirectory)'
+        - task: AzureWebApp@1
+          inputs:
+            azureSubscription: 'Azure subscription 1(f60fbb46-0270-4b98-bcae-6835c511cc39)'
+            appType: 'webAppLinux'
+            appName: 'azureinstanceiris'
+            package: '$(System.ArtifactsDirectory)/$(Build.BuildId).zip'
+            runtimeStack: 'PYTHON|3.10'
+            startUpCommand: 'gunicorn --bind=0.0.0.0 --timeout 600 --chdir game process:app'
